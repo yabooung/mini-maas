@@ -17,6 +17,12 @@ client ──Bearer key──▶ gateway ──▶ llama-small   (Qwen2.5-0.5B, 
                          └──▶ /metrics          (Prometheus) · SQLite usage ledger · JSONL request log
 ```
 
+## When to use this (and when not to)
+
+This is a small reference implementation, not a replacement for a full gateway product. If you run many providers or need an admin UI, teams, budgets and a Postgres-backed ledger, use [LiteLLM Proxy](https://github.com/BerriAI/litellm) or a managed gateway. Use this when you self-host one to three OpenAI-compatible servers and want keys, metering, fallback and metrics in ~1,500 lines you can read in an afternoon, with no database server.
+
+Status (2026-10): in production in front of one self-hosted vLLM + one MLX fallback; unit tests and `kustomize build` pass in CI. The `docker compose` quick start, the kind rolling-update measurement and the benchmark scripts have **not yet been run end to end** — the measurement tables below are empty until they are.
+
 ## What it does
 
 | Concern | Implementation |
