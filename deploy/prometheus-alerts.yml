@@ -1,0 +1,21 @@
+# Alerting rules (load into Prometheus with `rule_files`). Three rules that map to the
+# incidents this gateway was designed around: a backend silently down, latency regression,
+# and a backend that stopped reporting token usage (metering drift).
+groups:
+  - name: mmaas
+    rules:
+      - alert: BackendUnhealthy
+        expr: mmaas_backend_healthy == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations: { summary: "backend {{ $labels.backend }} failing health checks" }
+      - alert: LatencyP95High
+        expr: histogram_quantile(0.95, sum by (le, backend) (rate(mmaas_request_latency_seconds_bucket[5m]))) > 8
+        for: 2m
+        labels: { severity: warning }
+        annotations: { summary: "p95 latency over 8s on {{ $labels.backend }}" }
+      - alert: UsageEstimatedRatioHigh
+        expr: sum by (backend) (rate(mmaas_tokens_estimated_rows_total[10m])) / sum by (backend) (rate(mmaas_requests_total{status="200"}[10m])) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "{{ $labels.backend }} stopped reporting token usage; ledger is estimating" }

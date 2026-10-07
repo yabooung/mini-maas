@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-medium
+  labels: { app: llama-medium }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: llama-medium } }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: { app: llama-medium }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080" }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: llama
+          image: ghcr.io/ggml-org/llama.cpp:server
+          args:
+            - --hf-repo
+            - Qwen/Qwen2.5-1.5B-Instruct-GGUF
+            - --hf-file
+            - qwen2.5-1.5b-instruct-q4_k_m.gguf
+            - --alias
+            - qwen2.5-1.5b
+          env:
+            - { name: LLAMA_ARG_HOST, value: "0.0.0.0" }
+            - { name: LLAMA_ARG_PORT, value: "8080" }
+            - { name: LLAMA_ARG_N_PARALLEL, value: "4" }
+            - { name: LLAMA_ARG_CTX_SIZE, value: "16384" }
+            - { name: LLAMA_ARG_ENDPOINT_METRICS, value: "1" }
+            - { name: HF_HUB_CACHE, value: /models }
+          ports: [{ containerPort: 8080, name: http }]
+          volumeMounts: [{ name: models, mountPath: /models }]
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 120
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 5"] }
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+            limits: { cpu: "4", memory: 5Gi }
+      volumes:
+        - name: models
+          hostPath: { path: /var/lib/mmaas-models, type: DirectoryOrCreate }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-medium
+spec:
+  selector: { app: llama-medium }
+  ports: [{ port: 8080, targetPort: http }]

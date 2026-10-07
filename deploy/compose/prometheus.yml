@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: gateway
+    static_configs: [{ targets: ["gateway:8000"] }]
+  - job_name: llama
+    static_configs:
+      - targets: ["llama-small:8080"]
+        labels: { backend: llama-small }
+      - targets: ["llama-medium:8080"]
+        labels: { backend: llama-medium }

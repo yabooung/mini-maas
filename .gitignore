@@ -1,0 +1,16 @@
+# site-specific deployment (internal addresses, hosts, runner labels) — kept out of the public repo
+deploy/dgx/
+deploy/vm/
+.github/workflows/deploy.yml
+
+.venv/
+__pycache__/
+*.pyc
+data/
+results/*.jsonl
+gateway.yaml
+*.gguf
+.pytest_cache/
+*.egg-info/
+build/
+dist/

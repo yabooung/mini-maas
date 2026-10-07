@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-small
+  labels: { app: llama-small }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: llama-small } }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # new model version comes up before old goes down
+  template:
+    metadata:
+      labels: { app: llama-small }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080" }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: llama
+          image: ghcr.io/ggml-org/llama.cpp:server
+          args:
+            - --hf-repo
+            - Qwen/Qwen2.5-0.5B-Instruct-GGUF
+            - --hf-file
+            - qwen2.5-0.5b-instruct-q4_k_m.gguf     # "model version" — rolling update changes this file
+            - --alias
+            - qwen2.5-0.5b
+          env:
+            - { name: LLAMA_ARG_HOST, value: "0.0.0.0" }
+            - { name: LLAMA_ARG_PORT, value: "8080" }
+            - { name: LLAMA_ARG_N_PARALLEL, value: "4" }
+            - { name: LLAMA_ARG_CTX_SIZE, value: "16384" }
+            - { name: LLAMA_ARG_ENDPOINT_METRICS, value: "1" }
+            - { name: HF_HUB_CACHE, value: /models }
+          ports: [{ containerPort: 8080, name: http }]
+          volumeMounts: [{ name: models, mountPath: /models }]
+          readinessProbe:                       # llama-server returns 503 on /health until the model is loaded
+            httpGet: { path: /health, port: http }
+            periodSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 120               # up to 10 min for first download
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 5"] }
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { cpu: "4", memory: 3Gi }
+      volumes:
+        - name: models
+          hostPath: { path: /var/lib/mmaas-models, type: DirectoryOrCreate }   # kind node-local cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-small
+spec:
+  selector: { app: llama-small }
+  ports: [{ port: 8080, targetPort: http }]

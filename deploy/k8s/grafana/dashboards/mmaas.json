@@ -1,0 +1,44 @@
+{
+  "title": "mini-maas gateway",
+  "uid": "mmaas",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    { "id": 1, "type": "timeseries", "title": "Requests/s by status", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (status) (rate(mmaas_requests_total[30s]))", "legendFormat": "{{status}}" }] },
+    { "id": 2, "type": "timeseries", "title": "Requests/s by backend", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (backend) (rate(mmaas_requests_total[30s]))", "legendFormat": "{{backend}}" }] },
+    { "id": 3, "type": "timeseries", "title": "Latency p50 / p95 / p99 (s)", "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(mmaas_request_latency_seconds_bucket[1m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(mmaas_request_latency_seconds_bucket[1m])))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(mmaas_request_latency_seconds_bucket[1m])))", "legendFormat": "p99" }
+      ] },
+    { "id": 4, "type": "timeseries", "title": "TTFT p50 / p95 (s, streaming)", "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, backend) (rate(mmaas_ttft_seconds_bucket[1m])))", "legendFormat": "p50 {{backend}}" },
+        { "expr": "histogram_quantile(0.95, sum by (le, backend) (rate(mmaas_ttft_seconds_bucket[1m])))", "legendFormat": "p95 {{backend}}" }
+      ] },
+    { "id": 5, "type": "timeseries", "title": "Tokens/s (prompt vs completion)", "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (kind) (rate(mmaas_tokens_total[1m]))", "legendFormat": "{{kind}}" }] },
+    { "id": 6, "type": "stat", "title": "Backend healthy", "gridPos": { "x": 12, "y": 16, "w": 6, "h": 4 },
+      "targets": [{ "expr": "mmaas_backend_healthy", "legendFormat": "{{backend}}" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } } },
+    { "id": 7, "type": "stat", "title": "In-flight", "gridPos": { "x": 18, "y": 16, "w": 6, "h": 4 },
+      "targets": [{ "expr": "sum by (backend) (mmaas_inflight_requests)", "legendFormat": "{{backend}}" }] },
+    { "id": 8, "type": "timeseries", "title": "Fallbacks/s · Rate-limited/s · Auth failures/s", "gridPos": { "x": 12, "y": 20, "w": 12, "h": 4 },
+      "targets": [
+        { "expr": "sum(rate(mmaas_fallbacks_total[1m]))", "legendFormat": "fallbacks" },
+        { "expr": "sum(rate(mmaas_ratelimited_total[1m]))", "legendFormat": "rate-limited" },
+        { "expr": "sum(rate(mmaas_auth_failed_total[1m]))", "legendFormat": "auth failed" }
+      ] },
+    { "id": 9, "type": "timeseries", "title": "llama.cpp: predicted tokens/s per backend", "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (app) (rate(llamacpp:tokens_predicted_total[1m]))", "legendFormat": "{{app}}" }] },
+    { "id": 10, "type": "timeseries", "title": "llama.cpp: requests processing / deferred", "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum by (app) (llamacpp:requests_processing)", "legendFormat": "processing {{app}}" },
+        { "expr": "sum by (app) (llamacpp:requests_deferred)", "legendFormat": "deferred {{app}}" }
+      ] }
+  ]
+}

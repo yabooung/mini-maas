@@ -1,0 +1,45 @@
+# mini-maas gateway configuration (copy to gateway.yaml)
+
+listen:
+  host: 0.0.0.0
+  port: 8000
+
+storage:
+  sqlite_path: ./data/gateway.db        # keys + usage ledger
+
+logging:
+  meta_log: ./data/requests.jsonl       # always on: who/what/when/how long, no prompt text
+  body_log: null                        # set a path to also log prompt/response bodies (separate file, separate retention)
+
+health:
+  interval_seconds: 5                   # background probe of every backend
+  timeout_seconds: 2
+  unhealthy_after: 2                    # consecutive failures before a backend is skipped
+
+ratelimit:
+  default_per_minute: 60                # per API key; overridable per key
+
+routing:
+  # Rules are checked in order. A request is sent to the first healthy backend whose
+  # `models` contains the requested model (or whose `aliases` map it) and whose
+  # `max_input_tokens` is not exceeded. Lower `priority` number wins.
+  backends:
+    - name: llama-small
+      base_url: http://127.0.0.1:8081/v1
+      models: ["qwen2.5-0.5b"]
+      aliases: { "fast": "qwen2.5-0.5b" }
+      max_input_tokens: 4096
+      priority: 10
+    - name: llama-medium
+      base_url: http://127.0.0.1:8082/v1
+      models: ["qwen2.5-1.5b"]
+      aliases: { "default": "qwen2.5-1.5b", "fast": "qwen2.5-1.5b" }   # fast falls back here when llama-small is down
+      max_input_tokens: 8192
+      priority: 20
+  # Requests longer than this many input tokens are refused with 413 even if a backend could take them.
+  max_input_tokens_hard: 16384
+
+tools:
+  # Optional non-LLM backends exposed under /tools/{name}/... with the same auth/metering.
+  - name: jlawcite
+    base_url: http://127.0.0.1:8090
