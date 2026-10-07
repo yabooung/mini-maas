@@ -52,19 +52,23 @@ async def main_async(a):
     stats: Counter = Counter()
     tasks: list[asyncio.Task] = []
     interval = 1.0 / a.rps
-    async with httpx.AsyncClient(timeout=a.timeout) as client, open(a.out, "w") as out:
-        t_end = time.perf_counter() + a.duration
-        i = 0
-        next_t = time.perf_counter()
-        while time.perf_counter() < t_end:
-            tasks.append(asyncio.create_task(one(client, a.url, a.key, a.model, i, out, stats,
-                                                 a.max_tokens, a.stream)))
-            i += 1
-            next_t += interval
-            await asyncio.sleep(max(0.0, next_t - time.perf_counter()))
-            if i % (a.rps * 10) == 0:
-                print(f"[{i}] {dict(stats)}", flush=True)
-        await asyncio.gather(*tasks)
+    out = open(a.out, "w", encoding="utf-8")
+    try:
+        async with httpx.AsyncClient(timeout=a.timeout) as client:
+            t_end = time.perf_counter() + a.duration
+            i = 0
+            next_t = time.perf_counter()
+            while time.perf_counter() < t_end:
+                tasks.append(asyncio.create_task(one(client, a.url, a.key, a.model, i, out, stats,
+                                                     a.max_tokens, a.stream)))
+                i += 1
+                next_t += interval
+                await asyncio.sleep(max(0.0, next_t - time.perf_counter()))
+                if i % max(1, int(a.rps * 10)) == 0:
+                    print(f"[{i}] {dict(stats)}", flush=True)
+            await asyncio.gather(*tasks)
+    finally:
+        out.close()
     total = sum(stats.values())
     ok = stats.get(200, 0)
     print(json.dumps({"requests": total, "ok": ok, "failed": total - ok, "by_status": dict(stats)}, indent=1))
