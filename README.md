@@ -69,6 +69,17 @@ pip install -e .[dev] && pytest -q      # 19 tests: auth, IP, rate limit, routin
 
 > Not yet run — this section is filled from `results/` by the scripts below. Numbers are machine-specific; the machine is recorded with each run.
 
+### Fallback capacity (measured, 2026-10-07)
+
+The fallback backend in production is a Mac mini running `mlx_lm.server` with Qwen3.8-27B 4-bit. Before routing long prompts to it, its real capacity was measured with Korean statute text:
+
+| input | real prompt tokens | cold time (prefill-bound) | result |
+|---:|---:|---:|---|
+| 19,000 chars | 9,596 | 87 s | 200, correct summary |
+| 42,000 chars | 21,180 | 264 s | 200, correct summary |
+
+Korean legal text came out at ~2 chars/token, while the router's pre-estimate counts CJK as ~1 token/char — so the configured 32,768-token limit admits at most ~16k real tokens to the fallback, inside the measured-OK range. Larger requests while the primary is down get `503` instead of being handed to a backend that may not finish them; the client (a report writer) shrinks its input when it sees it is on the fallback tier.
+
 ### Rolling update request loss
 
 `bench/rolling_update.sh` drives constant-rate load through the gateway while a deployment rolls, then counts non-200 responses and the longest gap between successes.
