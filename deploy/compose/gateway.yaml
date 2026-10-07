@@ -1,0 +1,21 @@
+listen: { host: 0.0.0.0, port: 8000 }
+storage: { sqlite_path: /app/data/gateway.db }
+logging: { meta_log: /app/data/requests.jsonl, body_log: null }
+health: { interval_seconds: 5, timeout_seconds: 2, unhealthy_after: 2 }
+ratelimit: { default_per_minute: 120 }
+routing:
+  backends:
+    - name: llama-small
+      base_url: http://llama-small:8080/v1
+      models: ["qwen2.5-0.5b"]
+      aliases: { fast: qwen2.5-0.5b }
+      max_input_tokens: 4096
+      priority: 10
+    - name: llama-medium
+      base_url: http://llama-medium:8080/v1
+      models: ["qwen2.5-1.5b"]
+      aliases: { default: qwen2.5-1.5b, fast: qwen2.5-1.5b }
+      max_input_tokens: 4096
+      priority: 20
+  max_input_tokens_hard: 16384
+tools: []
