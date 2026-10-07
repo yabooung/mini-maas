@@ -17,7 +17,6 @@ import argparse
 import asyncio
 import json
 import re
-import statistics
 import time
 
 import httpx
@@ -87,7 +86,8 @@ async def sweep(client, url, model, headers, concurrency: int, rounds: int, max_
         "aggregate_tok_s": round(toks / wall, 2),
         "per_request_decode_tok_s_p50": pct([r["decode_tok_s"] for r in results if r["decode_tok_s"]], .5),
         "ttft_s_p50": pct([r["ttft_s"] for r in results], .5), "ttft_s_p95": pct([r["ttft_s"] for r in results], .95),
-        "latency_s_p50": pct([r["total_s"] for r in results], .5), "latency_s_p95": pct([r["total_s"] for r in results], .95),
+        "latency_s_p50": pct([r["total_s"] for r in results], .5),
+        "latency_s_p95": pct([r["total_s"] for r in results], .95),
         "prompt_tok_s_p50": pct([r["prompt_tok_s"] for r in results if r["prompt_tok_s"]], .5),
     }
 
@@ -104,7 +104,7 @@ def _match(answer: str, expected: str) -> bool:
 
 
 async def qa(client, url, model, headers, path: str) -> dict:
-    items = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    items = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
     correct = 0
     wrong = []
     for it in items:

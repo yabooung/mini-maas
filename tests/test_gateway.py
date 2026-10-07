@@ -134,7 +134,7 @@ async def test_streaming_passthrough_and_usage_from_final_chunk(gw, key, upstrea
     async with c.stream("POST", "/v1/chat/completions", json={**CHAT, "stream": True}, headers=auth(plain)) as r:
         assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-small"
         text = (await r.aread()).decode()
-    pieces = [json.loads(l[5:]) for l in text.splitlines() if l.startswith("data:") and "[DONE]" not in l]
+    pieces = [json.loads(ln[5:]) for ln in text.splitlines() if ln.startswith("data:") and "[DONE]" not in ln]
     assert "".join(_c(p) for p in pieces) == "Hello world"
     assert upstream_state.calls[-1]["body"]["stream_options"] == {"include_usage": True}
     row = state.storage.usage_rows(0, rec.id)[-1]

@@ -8,13 +8,14 @@ from collections import defaultdict
 
 
 def main(path: str) -> None:
-    rows = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    rows = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
     sweeps = [r for r in rows if r.get("kind") != "qa"]
     qas = {r["label"]: r for r in rows if r.get("kind") == "qa"}
     by_label: dict[str, list] = defaultdict(list)
     for r in sweeps:
         by_label[r["label"]].append(r)
-    print("| config | conc | agg tok/s | per-req decode tok/s p50 | TTFT p50 (s) | latency p50 (s) | latency p95 (s) | QA acc |")
+    print("| config | conc | agg tok/s | per-req decode tok/s p50 | TTFT p50 (s) "
+          "| latency p50 (s) | latency p95 (s) | QA acc |")
     print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for label, rs in by_label.items():
         for r in sorted(rs, key=lambda x: x["concurrency"]):

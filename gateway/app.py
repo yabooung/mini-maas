@@ -297,9 +297,11 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
         content = await request.body()
         try:
             resp = await client.request(request.method, url, content=content, headers=headers, timeout=60)
-            status, raw, ctype = resp.status_code, resp.content, resp.headers.get("content-type", "application/octet-stream")
+            status, raw = resp.status_code, resp.content
+            ctype = resp.headers.get("content-type", "application/octet-stream")
         except (httpx.HTTPError, OSError) as e:
-            status, raw, ctype = 502, json.dumps({"error": {"message": str(e), "type": "upstream"}}).encode(), "application/json"
+            status, ctype = 502, "application/json"
+            raw = json.dumps({"error": {"message": str(e), "type": "upstream"}}).encode()
         latency_ms = (time.perf_counter() - t0) * 1000
         storage.record_usage(UsageRow(
             request_id=rid, key_id=key.id, path=f"/tools/{tool}", model_requested=None, model_actual=None,

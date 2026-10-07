@@ -20,7 +20,7 @@ def pct(xs, q):
 
 
 def main(path: str) -> None:
-    rows = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    rows = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
     rows.sort(key=lambda r: r["i"])
     status = Counter(r["status"] for r in rows)
     ok = [r for r in rows if r["status"] == 200]
