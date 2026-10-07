@@ -1,5 +1,7 @@
 # mini-maas
 
+[![ci](https://github.com/yabooung/mini-maas/actions/workflows/ci.yml/badge.svg)](https://github.com/yabooung/mini-maas/actions/workflows/ci.yml) · image: `ghcr.io/yabooung/mini-maas:latest`
+
 A small, measured **LLM-as-a-Service gateway**: one OpenAI-compatible endpoint in front of several
 model backends, with API keys, IP allowlists, token metering, per-key rate limits, model routing with
 health-based fallback, Prometheus metrics, and Kubernetes manifests that do zero-loss rolling updates.
