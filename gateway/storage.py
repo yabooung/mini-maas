@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
     ip_allow    TEXT,
     rate_per_minute INTEGER,
     created_at  REAL NOT NULL,
-    revoked_at  REAL
+    revoked_at  REAL,
+    backends    TEXT
 );
 CREATE TABLE IF NOT EXISTS usage (
     id          INTEGER PRIMARY KEY,
@@ -56,6 +57,7 @@ class KeyRecord:
     rate_per_minute: int | None
     created_at: float
     revoked_at: float | None
+    backends: tuple[str, ...] | None = None  # None = any backend; else only these (no fallback outside)
 
     @property
     def revoked(self) -> bool:
@@ -96,6 +98,10 @@ class Storage:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(api_keys)")}
+        if "backends" not in cols:  # migrate ledgers created before per-key backend pinning
+            self._conn.execute("ALTER TABLE api_keys ADD COLUMN backends TEXT")
+            self._conn.commit()
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -104,16 +110,18 @@ class Storage:
     # ---- keys -------------------------------------------------------------
 
     def create_key(self, name: str, ip_allow: list[str] | None = None,
-                   rate_per_minute: int | None = None) -> tuple[str, KeyRecord]:
+                   rate_per_minute: int | None = None,
+                   backends: list[str] | None = None) -> tuple[str, KeyRecord]:
         """Create a key. Returns (plaintext_key, record). Plaintext is never stored."""
         plain = KEY_PREFIX + secrets.token_hex(24)
         prefix = plain[: len(KEY_PREFIX) + 8]
         with self._lock:
             cur = self._conn.execute(
-                "INSERT INTO api_keys(key_hash,prefix,name,ip_allow,rate_per_minute,created_at)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO api_keys(key_hash,prefix,name,ip_allow,rate_per_minute,created_at,backends)"
+                " VALUES (?,?,?,?,?,?,?)",
                 (_hash(plain), prefix, name,
-                 json.dumps(ip_allow) if ip_allow else None, rate_per_minute, time.time()),
+                 json.dumps(ip_allow) if ip_allow else None, rate_per_minute, time.time(),
+                 json.dumps(backends) if backends else None),
             )
             self._conn.commit()
             rec = self.get_key(cur.lastrowid)
@@ -133,6 +141,14 @@ class Storage:
         rows = self._conn.execute("SELECT * FROM api_keys ORDER BY id").fetchall()
         return [self._row_to_key(r) for r in rows]
 
+    def set_backends(self, key_id: int, backends: list[str] | None) -> bool:
+        """Pin a key to these backends (None/empty = unrestricted)."""
+        with self._lock:
+            cur = self._conn.execute("UPDATE api_keys SET backends=? WHERE id=?",
+                                     (json.dumps(backends) if backends else None, key_id))
+            self._conn.commit()
+        return cur.rowcount == 1
+
     def revoke_key(self, key_id: int) -> bool:
         with self._lock:
             cur = self._conn.execute(
@@ -144,11 +160,13 @@ class Storage:
     @staticmethod
     def _row_to_key(row: sqlite3.Row) -> KeyRecord:
         ip = json.loads(row["ip_allow"]) if row["ip_allow"] else None
+        be = json.loads(row["backends"]) if row["backends"] else None
         return KeyRecord(
             id=row["id"], prefix=row["prefix"], name=row["name"],
             ip_allow=tuple(ip) if ip else None,
             rate_per_minute=row["rate_per_minute"],
             created_at=row["created_at"], revoked_at=row["revoked_at"],
+            backends=tuple(be) if be else None,
         )
 
     # ---- usage ------------------------------------------------------------

@@ -30,9 +30,13 @@ def main(argv: list[str] | None = None) -> int:
     kc.add_argument("--name", required=True)
     kc.add_argument("--ip", help="comma-separated IPs/CIDRs allowed to use this key")
     kc.add_argument("--rate", type=int, help="requests per minute (default from config)")
+    kc.add_argument("--backends", help="comma-separated backend names this key may use (default: any)")
     keys.add_parser("list")
     kr = keys.add_parser("revoke")
     kr.add_argument("--id", type=int, required=True)
+    kb = keys.add_parser("set-backends")
+    kb.add_argument("--id", type=int, required=True)
+    kb.add_argument("--backends", default="", help="comma-separated; empty = unrestricted")
 
     us = sub.add_parser("usage")
     us.add_argument("--since", default="24h")
@@ -57,14 +61,20 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "keys":
             if a.kcmd == "create":
                 ips = [s.strip() for s in a.ip.split(",")] if a.ip else None
-                plain, rec = st.create_key(a.name, ips, a.rate)
+                bes = [s.strip() for s in a.backends.split(",") if s.strip()] if a.backends else None
+                plain, rec = st.create_key(a.name, ips, a.rate, bes)
                 print(f"id={rec.id} name={rec.name} key={plain}")
                 print("store this key now; it is not recoverable later", file=sys.stderr)
             elif a.kcmd == "list":
                 for r in st.list_keys():
                     flag = "REVOKED" if r.revoked else "active"
                     print(f"{r.id}\t{r.prefix}…\t{r.name}\t{flag}\trate={r.rate_per_minute or 'default'}"
-                          f"\tip={','.join(r.ip_allow) if r.ip_allow else 'any'}")
+                          f"\tip={','.join(r.ip_allow) if r.ip_allow else 'any'}"
+                          f"\tbackends={','.join(r.backends) if r.backends else 'any'}")
+            elif a.kcmd == "set-backends":
+                bes = [s.strip() for s in a.backends.split(",") if s.strip()] or None
+                ok = st.set_backends(a.id, bes)
+                print(f"key {a.id}: backends={','.join(bes) if bes else 'any'}" if ok else "no key with that id")
             elif a.kcmd == "revoke":
                 print("revoked" if st.revoke_key(a.id) else "no active key with that id")
         elif a.cmd == "usage":

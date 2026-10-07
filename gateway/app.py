@@ -179,7 +179,7 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
         stream = bool(body.get("stream"))
         est_prompt = estimate_request_tokens(body)
         try:
-            cands = state.router.candidates(model_req, est_prompt)
+            cands = state.router.candidates(model_req, est_prompt, key.backends)
         except RouteError as e:
             finalize(rid=rid, key=key, path=path, model_req=model_req, cand=None, status=e.status,
                      stream=stream, usage=None, est_prompt=est_prompt, completion_text="", t0=t0,

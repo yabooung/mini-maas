@@ -85,6 +85,45 @@ async def test_fallback_on_5xx_and_backend_marked_unhealthy(gw, key, upstream_st
     assert state.health.is_healthy("llama-small") is True
 
 
+async def test_pinned_key_never_falls_back(gw, upstream_state):
+    c, state = gw
+    plain, rec = state.storage.create_key("experiment", backends=["llama-small"])
+    r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+    assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-small"
+    upstream_state.down.add("llama-small")
+    n = len(upstream_state.calls)
+    r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+    assert r.status_code == 502  # tried its only backend, failed; medium never contacted
+    assert all(x["host"] == "llama-small" for x in upstream_state.calls[n:])
+    r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+    assert r.status_code == 503  # now marked unhealthy -> no candidate for this key
+    # an unpinned key still falls back
+    plain2, _ = state.storage.create_key("service")
+    r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain2))
+    assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-medium"
+    # pinning can be lifted
+    assert state.storage.set_backends(rec.id, None)
+    r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+    assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-medium"
+
+
+def test_storage_migrates_old_ledger(tmp_path):
+    import sqlite3
+    from gateway.storage import Storage
+    p = tmp_path / "old.db"
+    con = sqlite3.connect(p)
+    con.executescript("CREATE TABLE api_keys (id INTEGER PRIMARY KEY, key_hash TEXT UNIQUE NOT NULL,"
+                      " prefix TEXT NOT NULL, name TEXT NOT NULL, ip_allow TEXT, rate_per_minute INTEGER,"
+                      " created_at REAL NOT NULL, revoked_at REAL);"
+                      " INSERT INTO api_keys VALUES (1,'h','mm-x','old',NULL,NULL,0,NULL);")
+    con.commit()
+    con.close()
+    st = Storage(p)
+    assert st.get_key(1).backends is None
+    assert st.set_backends(1, ["dgx-vllm"]) and st.get_key(1).backends == ("dgx-vllm",)
+    st.close()
+
+
 async def test_all_backends_down_502_and_readyz_503(gw, key, upstream_state):
     c, state = gw
     plain, _ = key

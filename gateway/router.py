@@ -59,13 +59,18 @@ class Router:
         self._cfg = cfg
         self._health = health
 
-    def candidates(self, requested_model: str, input_tokens: int) -> list[Candidate]:
+    def candidates(self, requested_model: str, input_tokens: int,
+                   allowed: tuple[str, ...] | None = None) -> list[Candidate]:
+        """`allowed` pins a caller to specific backends (e.g. experiments that must not silently fall back
+        to a different quantization). Outside that set nothing is tried, so the caller gets 503 instead."""
         if input_tokens > self._cfg.max_input_tokens_hard:
             raise RouteError(413, f"input of ~{input_tokens} tokens exceeds hard limit "
                                   f"{self._cfg.max_input_tokens_hard}")
         served: list[Candidate] = []
         fits: list[Candidate] = []
         for b in sorted(self._cfg.backends, key=lambda b: b.priority):
+            if allowed is not None and b.name not in allowed:
+                continue
             m = b.resolve_model(requested_model)
             if m is None:
                 continue
