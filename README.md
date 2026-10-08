@@ -23,7 +23,7 @@ client ──Bearer key──▶ gateway ──▶ llama-small   (Qwen2.5-0.5B, 
 
 This is a small reference implementation, not a replacement for a full gateway product. If you run many providers or need an admin UI, teams, budgets and a Postgres-backed ledger, use [LiteLLM Proxy](https://github.com/BerriAI/litellm) or a managed gateway. Use this when you self-host one to three OpenAI-compatible servers and want keys, metering, fallback and metrics in ~1,500 lines you can read in an afternoon, with no database server.
 
-Status (2026-10): in production in front of one self-hosted vLLM + one MLX fallback; unit tests and `kustomize build` pass in CI. The `docker compose` quick start, the kind rolling-update measurement and the benchmark scripts have **not yet been run end to end** — the measurement tables below are empty until they are.
+Status (2026-10): in production in front of one self-hosted vLLM + one MLX fallback; unit tests and `kustomize build` pass in CI. The `docker compose` quick start and the kind deployment were run end to end from a fresh clone on 2026-10-09 (Apple Silicon, Docker Desktop 27.5, kind 0.33); that run found and fixed four problems — fixed host ports colliding with local services, API keys living in a per-pod SQLite so half of the requests to a 2-replica Service got `401`, an invalid YAML line from `keys gen`, and failed requests being flagged as estimated usage. The inference benchmark scripts (`bench/run_llama_matrix.sh`) have **not** been run yet.
 
 ## What it does
 
@@ -67,12 +67,12 @@ curl -s localhost:18000/v1/chat/completions -H "Authorization: Bearer $(head -1 
 Tests (no models needed — a fake upstream is driven in-process):
 
 ```bash
-pip install -e .[dev] && pytest -q      # 19 tests: auth, IP, rate limit, routing, fallback, recovery, metering, streaming, tools, metrics
+pip install -e .[dev] && pytest -q      # 25 tests: auth, IP, rate limit, routing, fallback, recovery, key pinning, static keys, metering, streaming, tools, metrics
 ```
 
 ## Measurements
 
-> Not yet run — this section is filled from `results/` by the scripts below. Numbers are machine-specific; the machine is recorded with each run.
+> Numbers are machine-specific. Rolling-update and fallback rows: kind / docker compose on an Apple Silicon Mac mini (Docker VM with 14 CPUs, 8 GB), CPU llama.cpp backends, one run each, 2026-10-09.
 
 ### Fallback capacity (measured, 2026-10-07)
 
@@ -91,12 +91,15 @@ Korean legal text came out at ~2 chars/token, while the router's pre-estimate co
 
 | rollout | rps | duration | requests | failed | longest success gap |
 |---|---:|---:|---:|---:|---:|
-| gateway `rollout restart` (2 replicas) | | | | | |
-| llama-small model file Q4_K_M → Q8_0 (1 replica, maxSurge=1) | | | | | |
+| gateway `rollout restart` (2 replicas) | 5 | 90 s | 450 | 0 | 0.20 s |
+| llama-small model file Q4_K_M → Q8_0, backend grace 60 s | 5 | 300 s | 1,500 | 0 | 0.21 s |
+| llama-small model file Q4_K_M → Q8_0, backend grace 15 s | 5 | 180 s | 900 | 0 | 0.20 s |
+
+With a 60 s termination grace, 2 of 1,500 requests took ~55 s: they went out on keep-alive connections still pinned to the terminating pod (kube-proxy only re-balances new connections), hung until the pod was killed, and were then retried on a fresh connection by the gateway (`mmaas_connection_retries_total` = 2, no fallback, no failure). With 15 s grace the next rollout had no stalls (max latency 1.05 s). One run each — a stall can still happen, but it is now bounded by ~10 s.
 
 ### Fallback switch time
 
-Kill `llama-small` under load; measure the gap between its last success and the first success on `llama-medium`.
+`docker compose stop llama-small`, then one request for the `fast` alias: served by `llama-medium` in 0.17 s end to end (`fallback_from=llama-small` in the ledger). Right after the backend is started again, the probe can still show it healthy for up to one probe interval while the model loads; requests in that window are tried on it, get `503`, and fall back — expected, not an error.
 
 ### Inference: quantization, speculative decoding, batching
 
