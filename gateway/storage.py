@@ -141,6 +141,30 @@ class Storage:
         rows = self._conn.execute("SELECT * FROM api_keys ORDER BY id").fetchall()
         return [self._row_to_key(r) for r in rows]
 
+    def ensure_static_key(self, name: str, key_hash: str, rate_per_minute: int | None = None,
+                          backends: list[str] | None = None, ip_allow: list[str] | None = None) -> KeyRecord:
+        """Insert or update a key known only by its SHA-256 (from a mounted secret). Idempotent."""
+        if len(key_hash) != 64 or any(c not in "0123456789abcdef" for c in key_hash):
+            raise ValueError(f"static key '{name}': sha256 must be 64 lowercase hex chars")
+        bj = json.dumps(backends) if backends else None
+        ij = json.dumps(ip_allow) if ip_allow else None
+        with self._lock:
+            row = self._conn.execute("SELECT id FROM api_keys WHERE key_hash=?", (key_hash,)).fetchone()
+            if row:
+                self._conn.execute(
+                    "UPDATE api_keys SET name=?, rate_per_minute=?, backends=?, ip_allow=?, revoked_at=NULL"
+                    " WHERE id=?", (name, rate_per_minute, bj, ij, row["id"]))
+                key_id = row["id"]
+            else:
+                key_id = self._conn.execute(
+                    "INSERT INTO api_keys(key_hash,prefix,name,ip_allow,rate_per_minute,created_at,backends)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    (key_hash, "static", name, ij, rate_per_minute, time.time(), bj)).lastrowid
+            self._conn.commit()
+        rec = self.get_key(key_id)
+        assert rec is not None
+        return rec
+
     def set_backends(self, key_id: int, backends: list[str] | None) -> bool:
         """Pin a key to these backends (None/empty = unrestricted)."""
         with self._lock:

@@ -34,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     keys.add_parser("list")
     kr = keys.add_parser("revoke")
     kr.add_argument("--id", type=int, required=True)
+    kg = keys.add_parser("gen", help="print a new key + a static_keys_file entry (nothing is stored)")
+    kg.add_argument("--name", required=True)
+    kg.add_argument("--rate", type=int)
+    kg.add_argument("--backends", help="comma-separated backend names")
     kb = keys.add_parser("set-backends")
     kb.add_argument("--id", type=int, required=True)
     kb.add_argument("--backends", default="", help="comma-separated; empty = unrestricted")
@@ -48,6 +52,20 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int)
 
     a = p.parse_args(argv)
+    if a.cmd == "keys" and a.kcmd == "gen":  # needs no config or ledger
+        import hashlib
+        import secrets
+        plain = "mm-" + secrets.token_hex(24)
+        entry = {"name": a.name, "sha256": hashlib.sha256(plain.encode()).hexdigest()}
+        if a.rate:
+            entry["rate_per_minute"] = a.rate
+        if a.backends:
+            entry["backends"] = [s.strip() for s in a.backends.split(",") if s.strip()]
+        print(f"key={plain}")
+        print("# add to the static_keys_file (e.g. a Kubernetes Secret):", file=sys.stderr)
+        line = "- " + ", ".join(f"{k}: {json.dumps(v)}" for k, v in entry.items())
+        print(line)
+        return 0
     cfg = load_config(a.config)
 
     if a.cmd == "serve":

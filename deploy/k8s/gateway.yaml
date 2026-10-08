@@ -24,6 +24,7 @@ spec:
           ports: [{ containerPort: 8000, name: http }]
           volumeMounts:
             - { name: config, mountPath: /app/gateway.yaml, subPath: gateway.yaml, readOnly: true }
+            - { name: keys, mountPath: /etc/mmaas, readOnly: true }
             - { name: data, mountPath: /app/data }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
@@ -41,10 +42,13 @@ spec:
       volumes:
         - name: config
           configMap: { name: gateway-config }
+        - name: keys
+          secret: { secretName: gateway-keys, optional: true }   # keys.yaml from `mmaas keys gen`
         - name: data
           emptyDir: {}
-# NOTE: keys/usage live in an emptyDir per pod for this demo. For a real deployment mount a
-# PVC (single replica) or move the ledger to Postgres and the rate-limit buckets to Redis.
+# Keys come from the gateway-keys Secret, so every replica accepts the same keys (only SHA-256 hashes
+# are stored). The usage ledger and rate-limit buckets stay per pod (emptyDir): aggregate usage from
+# Prometheus (mmaas_tokens_total), or move the ledger to Postgres and the buckets to Redis.
 ---
 apiVersion: v1
 kind: Service

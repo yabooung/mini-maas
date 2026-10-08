@@ -65,10 +65,29 @@ def _completion_text(obj) -> str:
     return "".join(out)
 
 
+def load_static_keys(cfg: GatewayConfig, storage: Storage) -> int:
+    """Load keys from auth.static_keys_file (if set and present). Returns how many were loaded."""
+    path = cfg.auth.static_keys_file
+    if not path:
+        return 0
+    from pathlib import Path
+
+    import yaml
+    p = Path(path)
+    if not p.exists():
+        return 0
+    entries = yaml.safe_load(p.read_text(encoding="utf-8")) or []
+    for e in entries:
+        storage.ensure_static_key(e["name"], str(e["sha256"]).lower(), e.get("rate_per_minute"),
+                                  e.get("backends"), e.get("ip_allow"))
+    return len(entries)
+
+
 def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
                storage: Storage | None = None, run_health_loop: bool = True) -> FastAPI:
     client = client or httpx.AsyncClient(timeout=None)
     storage = storage or Storage(cfg.storage.sqlite_path)
+    load_static_keys(cfg, storage)
     health = HealthMonitor(cfg.routing.backends, cfg.health, client)
     for b in cfg.routing.backends:
         metrics.BACKEND_HEALTHY.labels(backend=b.name).set(1)

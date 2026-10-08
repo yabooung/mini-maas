@@ -67,8 +67,16 @@ class ToolCfg(BaseModel):
     base_url: str
 
 
+class AuthCfg(BaseModel):
+    # YAML list of {name, sha256, rate_per_minute?, backends?, ip_allow?}. Loaded at startup into the
+    # local ledger, so every replica accepts the same keys (mount it from a Kubernetes Secret).
+    # Generate entries with `mmaas keys gen --name ...`; only the hash is stored.
+    static_keys_file: str | None = None
+
+
 class GatewayConfig(BaseModel):
     listen: ListenCfg = Field(default_factory=ListenCfg)
+    auth: AuthCfg = Field(default_factory=AuthCfg)
     storage: StorageCfg = Field(default_factory=StorageCfg)
     logging: LoggingCfg = Field(default_factory=LoggingCfg)
     health: HealthCfg = Field(default_factory=HealthCfg)

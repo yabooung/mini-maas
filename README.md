@@ -43,7 +43,7 @@ Status (2026-10): in production in front of one self-hosted vLLM + one MLX fallb
 
 ```bash
 # local: gateway + two llama.cpp CPU backends + Prometheus + Grafana
-docker compose up -d
+docker compose up -d                 # host ports on 127.0.0.1; override e.g. GRAFANA_PORT=3001 GATEWAY_PORT=8100
 docker compose exec gateway mmaas --config /app/gateway.yaml keys create --name dev --rate 120
 curl -s localhost:8000/v1/chat/completions -H "Authorization: Bearer mm-…" \
   -d '{"model":"fast","messages":[{"role":"user","content":"hi"}]}' -i | grep -i x-mmaas
@@ -53,10 +53,15 @@ docker compose exec gateway mmaas --config /app/gateway.yaml usage --since 1h --
 
 ```bash
 # kubernetes (kind): rolling updates with maxUnavailable=0, readiness on /readyz and llama's /health, HPA on the gateway
-kind create cluster --name mmaas --config deploy/k8s/kind-config.yaml
+kind create cluster --name mmaas --config deploy/k8s/kind-config.yaml   # host ports 18000/19090/13000
 docker build -t mini-maas/gateway:dev . && kind load docker-image mini-maas/gateway:dev --name mmaas
+kubectl create namespace mmaas
+# keys are shared by all gateway replicas via a Secret (only SHA-256 hashes are stored)
+docker run --rm --entrypoint mmaas mini-maas/gateway:dev keys gen --name dev > /tmp/dev.key   # line 1 = key, line 2 = entry
+tail -1 /tmp/dev.key > /tmp/keys.yaml && kubectl -n mmaas create secret generic gateway-keys --from-file=keys.yaml=/tmp/keys.yaml
 kubectl apply -k deploy/k8s
 kubectl -n mmaas rollout status deploy/llama-medium --timeout=10m   # first start downloads the GGUF
+curl -s localhost:18000/v1/chat/completions -H "Authorization: Bearer $(head -1 /tmp/dev.key | cut -d= -f2)"   -d '{"model":"fast","messages":[{"role":"user","content":"hi"}]}'
 ```
 
 Tests (no models needed — a fake upstream is driven in-process):

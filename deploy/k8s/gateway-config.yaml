@@ -1,4 +1,5 @@
 listen: { host: 0.0.0.0, port: 8000 }
+auth: { static_keys_file: /etc/mmaas/keys.yaml }   # Secret gateway-keys — same keys on every replica
 storage: { sqlite_path: /app/data/gateway.db }
 logging: { meta_log: /app/data/requests.jsonl, body_log: null }
 health: { interval_seconds: 3, timeout_seconds: 2, unhealthy_after: 2 }

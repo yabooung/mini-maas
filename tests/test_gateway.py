@@ -107,6 +107,45 @@ async def test_pinned_key_never_falls_back(gw, upstream_state):
     assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-medium"
 
 
+async def test_static_keys_shared_across_replicas(tmp_path, upstream_state):
+    """Two gateway replicas with separate ledgers accept the same key when it comes from a static keys file."""
+    import hashlib
+
+    import httpx as _httpx
+
+    from gateway.app import create_app, load_static_keys
+    from gateway.config import GatewayConfig
+    from gateway.storage import Storage
+    from tests.conftest import CONFIG, make_upstream
+    plain = "mm-" + "ab" * 24
+    kf = tmp_path / "keys.yaml"
+    kf.write_text(f"- {{name: shared, sha256: {hashlib.sha256(plain.encode()).hexdigest()}, "
+                  f"backends: [llama-small]}}\n", encoding="utf-8")
+    cfg = GatewayConfig.model_validate({**CONFIG, "auth": {"static_keys_file": str(kf)}})
+    for _ in range(2):  # two independent replicas
+        st = Storage(":memory:")
+        up = _httpx.AsyncClient(transport=_httpx.ASGITransport(app=make_upstream(upstream_state)))
+        app = create_app(cfg, client=up, storage=st, run_health_loop=False)
+        async with _httpx.AsyncClient(transport=_httpx.ASGITransport(app=app), base_url="http://gw") as c:
+            r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+            assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-small"
+        assert load_static_keys(cfg, st) == 1  # idempotent reload
+        assert len([k for k in st.list_keys() if k.name == "shared"]) == 1
+        await up.aclose()
+        st.close()
+
+
+def test_keys_gen_prints_hash_only_entry(capsys):
+    import hashlib
+
+    from gateway.cli import main
+    assert main(["keys", "gen", "--name", "svc", "--rate", "30", "--backends", "a,b"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    plain = out[0].split("=", 1)[1]
+    assert hashlib.sha256(plain.encode()).hexdigest() in out[1]
+    assert plain not in out[1] and '"backends": ["a", "b"]' in out[1].replace("backends:", '"backends":')
+
+
 def test_storage_migrates_old_ledger(tmp_path):
     import sqlite3
     from gateway.storage import Storage
