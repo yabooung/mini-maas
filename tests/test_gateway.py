@@ -135,15 +135,31 @@ async def test_static_keys_shared_across_replicas(tmp_path, upstream_state):
         st.close()
 
 
-def test_keys_gen_prints_hash_only_entry(capsys):
+def test_keys_gen_output_loads_as_static_keys_file(capsys, tmp_path):
+    """The printed entry must be valid YAML that the gateway can load (a block-mapping line with commas
+    crashed every gateway pod in the kind verification — this test parses it for real)."""
     import hashlib
 
+    import yaml
+
+    from gateway.app import load_static_keys
     from gateway.cli import main
+    from gateway.config import GatewayConfig
+    from gateway.storage import Storage
     assert main(["keys", "gen", "--name", "svc", "--rate", "30", "--backends", "a,b"]) == 0
     out = capsys.readouterr().out.splitlines()
     plain = out[0].split("=", 1)[1]
-    assert hashlib.sha256(plain.encode()).hexdigest() in out[1]
-    assert plain not in out[1] and '"backends": ["a", "b"]' in out[1].replace("backends:", '"backends":')
+    assert plain not in out[1]
+    entries = yaml.safe_load(out[1])
+    assert entries == [{"name": "svc", "sha256": hashlib.sha256(plain.encode()).hexdigest(),
+                        "rate_per_minute": 30, "backends": ["a", "b"]}]
+    kf = tmp_path / "keys.yaml"
+    kf.write_text(out[1] + "\n", encoding="utf-8")
+    st = Storage(":memory:")
+    assert load_static_keys(GatewayConfig.model_validate({"auth": {"static_keys_file": str(kf)}}), st) == 1
+    rec = st.verify_key(plain)
+    assert rec is not None and rec.name == "svc" and rec.backends == ("a", "b") and rec.rate_per_minute == 30
+    st.close()
 
 
 def test_storage_migrates_old_ledger(tmp_path):

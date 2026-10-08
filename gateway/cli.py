@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             entry["backends"] = [s.strip() for s in a.backends.split(",") if s.strip()]
         print(f"key={plain}")
         print("# add to the static_keys_file (e.g. a Kubernetes Secret):", file=sys.stderr)
-        line = "- " + ", ".join(f"{k}: {json.dumps(v)}" for k, v in entry.items())
+        line = "- {" + ", ".join(f"{k}: {json.dumps(v)}" for k, v in entry.items()) + "}"  # YAML flow map
         print(line)
         return 0
     cfg = load_config(a.config)
