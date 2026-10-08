@@ -18,5 +18,7 @@ RATELIMITED = Counter("mmaas_ratelimited_total", "Requests rejected by rate limi
 AUTH_FAILED = Counter("mmaas_auth_failed_total", "Requests rejected by auth", ["reason"])
 FALLBACKS = Counter("mmaas_fallbacks_total", "Requests re-routed after a backend failure",
                     ["from_backend", "to_backend"])
+CONN_RETRIES = Counter("mmaas_connection_retries_total",
+                       "Same-backend retries after a connection died before any response", ["backend"])
 BACKEND_HEALTHY = Gauge("mmaas_backend_healthy", "1 if backend passes health checks", ["backend"])
 INFLIGHT = Gauge("mmaas_inflight_requests", "Requests currently being proxied", ["backend"])

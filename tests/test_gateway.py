@@ -133,6 +133,41 @@ async def test_all_backends_down_502_and_readyz_503(gw, key, upstream_state):
     assert (await c.get("/readyz")).status_code == 503
 
 
+async def test_stale_connection_retried_on_same_backend(gw, key, upstream_state, monkeypatch):
+    """A connection that dies before any response (e.g. pooled socket to a restarted backend) is retried once
+    on the same backend instead of falling back — found while verifying the compose stack on a Mac."""
+    import httpx as _httpx
+    c, state = gw
+    plain, rec = key
+    real_send = state.client.send
+    calls = {"n": 0}
+
+    async def flaky_send(req, **kw):
+        if "llama-small" in str(req.url) and req.url.path.endswith("/chat/completions") and calls["n"] == 0:
+            calls["n"] += 1
+            raise _httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        return await real_send(req, **kw)
+
+    monkeypatch.setattr(state.client, "send", flaky_send)
+    r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+    assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-small"
+    row = state.storage.usage_rows(0, rec.id)[-1]
+    assert row["fallback_from"] is None and calls["n"] == 1
+    assert state.health.is_healthy("llama-small")
+
+
+async def test_failed_requests_are_not_metered(gw, key, upstream_state):
+    c, state = gw
+    plain, rec = key
+    await c.post("/v1/chat/completions", json={**CHAT, "model": "nope"}, headers=auth(plain))
+    row = state.storage.usage_rows(0, rec.id)[-1]
+    assert (row["status"], row["prompt_tokens"], row["completion_tokens"], row["usage_estimated"]) == (404, 0, 0, 0)
+    upstream_state.down.update({"llama-small", "llama-medium"})
+    await c.post("/v1/chat/completions", json=CHAT, headers=auth(plain))
+    row = state.storage.usage_rows(0, rec.id)[-1]
+    assert (row["status"], row["prompt_tokens"], row["usage_estimated"]) == (502, 0, 0)
+
+
 async def test_unknown_model_404_and_hard_limit_413(gw, key):
     c, _ = gw
     plain, _ = key

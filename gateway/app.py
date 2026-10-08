@@ -132,10 +132,13 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
         model_act = cand.model if cand else None
         if usage is not None:
             p_tok, c_tok, estimated = usage[0], usage[1], False
+        elif backend is None or (status >= 400 and status != 499):
+            # Failed or unrouted requests are not metered: no tokens, and not flagged as an estimate.
+            # 499 (client left mid-stream) is still estimated: the backend did generate those tokens.
+            p_tok, c_tok, estimated = 0, 0, False
         else:
             p_tok, c_tok, estimated = est_prompt, estimate_tokens(completion_text), True
-            if backend and status < 400:
-                metrics.TOKENS_ESTIMATED.labels(backend=backend).inc()
+            metrics.TOKENS_ESTIMATED.labels(backend=backend).inc()
         storage.record_usage(UsageRow(
             request_id=rid, key_id=key.id, path=path, model_requested=model_req, model_actual=model_act,
             backend=backend, status=status, stream=stream, prompt_tokens=p_tok, completion_tokens=c_tok,
@@ -199,12 +202,27 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
             if b.api_key:
                 headers["authorization"] = f"Bearer {b.api_key}"
             url = b.base_url.rstrip("/") + path.removeprefix("/v1")
-            req = client.build_request("POST", url, json=upstream, headers=headers,
-                                       timeout=b.timeout_seconds)
             metrics.INFLIGHT.labels(backend=b.name).inc()
-            try:
-                resp = await client.send(req, stream=True)
-            except (httpx.HTTPError, OSError):
+            resp = None
+            # A connection that dies before any response (typically a pooled keep-alive socket to a
+            # backend that has just restarted) gets one immediate retry on a fresh connection before
+            # we fall back — otherwise the first request after every backend restart lands on the
+            # fallback model for no reason. Timeouts and 5xx are not retried here.
+            for attempt in (1, 2):
+                req = client.build_request("POST", url, json=upstream, headers=headers,
+                                           timeout=b.timeout_seconds)
+                try:
+                    resp = await client.send(req, stream=True)
+                    break
+                except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError):
+                    if attempt == 1:
+                        metrics.CONN_RETRIES.labels(backend=b.name).inc()
+                        continue
+                    resp = None
+                except (httpx.HTTPError, OSError):
+                    resp = None
+                    break
+            if resp is None:
                 metrics.INFLIGHT.labels(backend=b.name).dec()
                 health.report_failure(b.name)
                 fallback_from = fallback_from or b.name
