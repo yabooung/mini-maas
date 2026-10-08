@@ -135,7 +135,7 @@ async def test_all_backends_down_502_and_readyz_503(gw, key, upstream_state):
 
 async def test_stale_connection_retried_on_same_backend(gw, key, upstream_state, monkeypatch):
     """A connection that dies before any response (e.g. pooled socket to a restarted backend) is retried once
-    on the same backend instead of falling back — found while verifying the compose stack on a Mac."""
+    on the same backend instead of falling back. Defensive — simulated here, not observed in the Mac run."""
     import httpx as _httpx
     c, state = gw
     plain, rec = key

@@ -204,10 +204,11 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
             url = b.base_url.rstrip("/") + path.removeprefix("/v1")
             metrics.INFLIGHT.labels(backend=b.name).inc()
             resp = None
-            # A connection that dies before any response (typically a pooled keep-alive socket to a
-            # backend that has just restarted) gets one immediate retry on a fresh connection before
-            # we fall back — otherwise the first request after every backend restart lands on the
-            # fallback model for no reason. Timeouts and 5xx are not retried here.
+            # Defensive: a connection that dies before any response (e.g. a pooled keep-alive socket to
+            # a backend that restarted) gets one immediate retry on a fresh connection before we fall
+            # back. Not observed in the compose verification (the fallback seen there was a backend
+            # still loading its model, which is correct); counted in mmaas_connection_retries_total so
+            # it can be checked in production. Timeouts and 5xx are not retried here.
             for attempt in (1, 2):
                 req = client.build_request("POST", url, json=upstream, headers=headers,
                                            timeout=b.timeout_seconds)
