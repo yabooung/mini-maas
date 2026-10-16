@@ -38,6 +38,7 @@ Status (2026-10): in production in front of one self-hosted vLLM + one MLX fallb
 | Logging | meta log (who/what/when/how long, no prompt text) always; body log opt-in and separate |
 | Metrics | requests, latency & TTFT histograms, tokens, estimated-usage rows, fallbacks, rate-limited, auth failures, backend health, in-flight |
 | Tools | `/tools/{name}/…` reverse proxy for non-LLM services (e.g. a search index) under the same keys |
+| Cache isolation | for vLLM backends marked `cache_salt: true`, the gateway sets vLLM's `cache_salt` from the caller's key (mixed with the caller's own salt, e.g. per user), so prefix-cache hits — and their timing side channel — never cross keys |
 
 ## Run it
 
@@ -67,7 +68,7 @@ curl -s localhost:18000/v1/chat/completions -H "Authorization: Bearer $(head -1 
 Tests (no models needed — a fake upstream is driven in-process):
 
 ```bash
-pip install -e .[dev] && pytest -q      # 25 tests: auth, IP, rate limit, routing, fallback, recovery, key pinning, static keys, metering, streaming, tools, metrics
+pip install -e .[dev] && pytest -q      # 26 tests: auth, IP, rate limit, routing, fallback, recovery, key pinning, static keys, cache salt, metering, streaming, tools, metrics
 ```
 
 ## Measurements
@@ -100,6 +101,20 @@ With a 60 s termination grace, 2 of 1,500 requests took ~55 s: they went out on 
 ### Fallback switch time
 
 `docker compose stop llama-small`, then one request for the `fast` alias: served by `llama-medium` in 0.17 s end to end (`fallback_from=llama-small` in the ledger). Right after the backend is started again, the probe can still show it healthy for up to one probe interval while the model loads; requests in that window are tried on it, get `503`, and fall back — expected, not an error.
+
+### Prefix-cache isolation (measured, 2026-10-16)
+
+Production vLLM (Qwen3.8-27B FP8, `--enable-prefix-caching`, v0.23.1rc1) behind the gateway, a 15,134-token prompt, `max_tokens=1`, hit rate from `vllm:prefix_cache_hits_total / queries_total` per request:
+
+| request | hit rate | TTFT |
+|---|---:|---:|
+| key A, first time | 0 % | 9.7 s |
+| key A, same prompt again (same job) | 98.5 % | 0.34 s |
+| caller without the gateway, same prompt, no salt | 0 % | 11.5 s |
+| key A + caller salt `user-1` | 0 % | 9.6 s |
+| key A + `user-1` again | 98.5 % | 0.33 s |
+
+Without salts the second and third rows would both be hits: a 30× TTFT gap that one request can read, which is the cross-user prompt leak described in *Auditing Prompt Caching in Language Model APIs* (Gu et al., ICML 2025). With the salt, reuse inside one key (or one key + user) is unchanged and nothing is shared across them. The salt is derived from the key's SHA-256, so every replica computes the same value and a client cannot submit another key's salt. A local run of the same code with two keys gave key B 0 % on key A's prompt.
 
 ### Inference: quantization, speculative decoding, batching
 

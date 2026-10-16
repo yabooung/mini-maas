@@ -42,6 +42,10 @@ class BackendCfg(BaseModel):
     priority: int = 100
     api_key: str | None = None  # sent upstream as Bearer if the backend itself requires one
     timeout_seconds: float = 120.0
+    # Backend honors vLLM's per-request `cache_salt` (prefix-cache isolation). When true the gateway
+    # always sets it to a value derived from the caller's key (+ the caller's own salt, if any), so
+    # different keys never share cached prefixes and a client cannot pick another key's salt.
+    cache_salt: bool = False
 
     def resolve_model(self, requested: str) -> str | None:
         """Return the backend's own model name for a requested name, or None if unserved."""

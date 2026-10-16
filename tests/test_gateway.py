@@ -135,6 +135,59 @@ async def test_static_keys_shared_across_replicas(tmp_path, upstream_state):
         st.close()
 
 
+async def test_cache_salt_isolates_keys_and_is_stable_across_replicas(tmp_path, upstream_state):
+    """`cache_salt` backends get a salt the gateway derives per key (+ client salt): keys never share it,
+    a client cannot choose it, and every replica computes the same one so cache reuse survives load balancing."""
+    import hashlib
+
+    import httpx as _httpx
+
+    from gateway.app import create_app, load_static_keys
+    from gateway.config import GatewayConfig
+    from gateway.storage import Storage
+    from tests.conftest import CONFIG, make_upstream
+    keys = {"a": "mm-" + "aa" * 24, "b": "mm-" + "bb" * 24}
+    kf = tmp_path / "keys.yaml"
+    kf.write_text("".join(f"- {{name: {n}, sha256: {hashlib.sha256(p.encode()).hexdigest()}}}\n"
+                          for n, p in keys.items()), encoding="utf-8")
+    backends = [dict(b, cache_salt=(b["name"] == "llama-small")) for b in CONFIG["routing"]["backends"]]
+    cfg = GatewayConfig.model_validate({**CONFIG, "auth": {"static_keys_file": str(kf)},
+                                        "routing": {**CONFIG["routing"], "backends": backends}})
+
+    async def salt_on(c, who, client_salt=None):
+        body = dict(CHAT) if client_salt is None else dict(CHAT, cache_salt=client_salt)
+        r = await c.post("/v1/chat/completions", json=body, headers=auth(keys[who]))
+        assert r.status_code == 200 and r.headers["X-MMaaS-Backend"] == "llama-small"
+        return upstream_state.calls[-1]["body"]["cache_salt"]
+
+    seen = []
+    for _ in range(2):  # two independent replicas
+        st = Storage(":memory:")
+        up = _httpx.AsyncClient(transport=_httpx.ASGITransport(app=make_upstream(upstream_state)))
+        app = create_app(cfg, client=up, storage=st, run_health_loop=False)
+        async with _httpx.AsyncClient(transport=_httpx.ASGITransport(app=app), base_url="http://gw") as c:
+            a, b = await salt_on(c, "a"), await salt_on(c, "b")
+            assert a != b and await salt_on(c, "a") == a                      # per key, stable
+            a_u1 = await salt_on(c, "a", "user-1")
+            assert a_u1 not in (a, await salt_on(c, "a", "user-2"))           # client salt splits a key
+            assert await salt_on(c, "a", "user-1") == a_u1                    # same user/job -> same salt
+            assert await salt_on(c, "b", "user-1") != a_u1                    # same client salt, other key
+            assert await salt_on(c, "b", a) != a                              # cannot submit another key's salt
+            r = await c.post("/v1/chat/completions", json=dict(CHAT, cache_salt=""), headers=auth(keys["a"]))
+            assert r.status_code == 400
+            # a backend without cache_salt support gets the body untouched
+            upstream_state.down.add("llama-small")
+            r = await c.post("/v1/chat/completions", json=CHAT, headers=auth(keys["a"]))
+            assert r.headers["X-MMaaS-Backend"] == "llama-medium"
+            assert "cache_salt" not in upstream_state.calls[-1]["body"]
+            upstream_state.down.discard("llama-small")
+        seen.append((a, b, a_u1))
+        assert load_static_keys(cfg, st) == 2
+        await up.aclose()
+        st.close()
+    assert seen[0] == seen[1]
+
+
 def test_keys_gen_output_loads_as_static_keys_file(capsys, tmp_path):
     """The printed entry must be valid YAML that the gateway can load (a block-mapping line with commas
     crashed every gateway pod in the kind verification — this test parses it for real)."""

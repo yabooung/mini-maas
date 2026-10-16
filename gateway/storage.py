@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 KEY_PREFIX = "mm-"
@@ -58,6 +58,7 @@ class KeyRecord:
     created_at: float
     revoked_at: float | None
     backends: tuple[str, ...] | None = None  # None = any backend; else only these (no fallback outside)
+    key_hash: str = field(default="", repr=False)  # seeds the per-key prefix-cache salt; never logged
 
     @property
     def revoked(self) -> bool:
@@ -191,6 +192,7 @@ class Storage:
             rate_per_minute=row["rate_per_minute"],
             created_at=row["created_at"], revoked_at=row["revoked_at"],
             backends=tuple(be) if be else None,
+            key_hash=row["key_hash"],
         )
 
     # ---- usage ------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
@@ -50,6 +51,16 @@ def _usage_from(obj) -> tuple[int, int] | None:
         return int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0))
     except (TypeError, ValueError):
         return None
+
+
+def _cache_salt(key: KeyRecord, client_salt: str | None) -> str:
+    """Prefix-cache salt sent to `cache_salt` backends: unique per key, and per client salt within a key.
+
+    Seeded by the key's SHA-256, which only the gateway holds, so it is identical on every replica and
+    across restarts (cache reuse survives load balancing) yet no client can compute another key's salt.
+    A client's own salt (e.g. medi-back's per-user value) splits its key's cache further."""
+    raw = f"mmaas-cache-salt/v1\0{key.key_hash}\0{client_salt or ''}"
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def _completion_text(obj) -> str:
@@ -198,6 +209,9 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
         model_req = body.get("model")
         if not isinstance(model_req, str) or not model_req:
             return _error(400, "'model' is required", "invalid_request", rid)
+        client_salt = body.get("cache_salt")
+        if client_salt is not None and (not isinstance(client_salt, str) or not client_salt):
+            return _error(400, "'cache_salt' must be a non-empty string", "invalid_request", rid)
         stream = bool(body.get("stream"))
         est_prompt = estimate_request_tokens(body)
         try:
@@ -217,6 +231,8 @@ def create_app(cfg: GatewayConfig, *, client: httpx.AsyncClient | None = None,
         for cand in cands:
             b = cand.backend
             upstream = dict(body, model=cand.model)
+            if b.cache_salt:
+                upstream["cache_salt"] = _cache_salt(key, client_salt)
             headers = dict(fwd_headers)
             if b.api_key:
                 headers["authorization"] = f"Bearer {b.api_key}"

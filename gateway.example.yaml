@@ -36,6 +36,9 @@ routing:
       aliases: { "default": "qwen2.5-1.5b", "fast": "qwen2.5-1.5b" }   # fast falls back here when llama-small is down
       max_input_tokens: 8192
       priority: 20
+  # vLLM backends with --enable-prefix-caching: add `cache_salt: true` and the gateway sets the
+  # request's `cache_salt` from the caller's key (mixed with any `cache_salt` the caller sends, e.g. a
+  # per-user value), so prefix-cache hits — and their timing side channel — never cross keys.
   # Requests longer than this many input tokens are refused with 413 even if a backend could take them.
   max_input_tokens_hard: 16384
 
